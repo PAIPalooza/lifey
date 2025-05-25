@@ -34,6 +34,13 @@ def validate_database_url(v: Optional[str]) -> str:
         logger.warning(f"No DATABASE_URL provided, using default: {default_url.replace('postgres:postgres', 'postgres:****')}")
         return default_url
     
+    # Handle the case where Railway.com includes the variable name in the value
+    # Example: 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/alodb'
+    if v.startswith('DATABASE_URL='):
+        logger.warning("Detected variable name in DATABASE_URL value, stripping prefix")
+        v = v.replace('DATABASE_URL=', '', 1)
+        logger.info(f"Corrected DATABASE_URL format")
+    
     # Special handling for Railway.com placeholder format
     # Railway might provide URLs with placeholders like postgresql://user:pass@hostname:port/database
     if '@hostname:port/' in v or 'hostname' in v or 'port' in v:

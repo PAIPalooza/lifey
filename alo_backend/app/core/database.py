@@ -17,9 +17,18 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-# Check if this is a Railway.com deployment with placeholder URL
+# Check if this is a Railway.com deployment with placeholder URL or malformed URL
 db_url = settings.DATABASE_URL
 use_fallback = False
+
+# Handle the case where Railway.com includes the variable name in the value
+# Example: 'DATABASE_URL=postgresql://postgres:postgres@localhost:5432/alodb'
+if db_url.startswith('DATABASE_URL='):
+    logger.warning("Detected variable name in DATABASE_URL value, stripping prefix")
+    db_url = db_url.replace('DATABASE_URL=', '', 1)
+    # Update the settings value as well
+    settings.DATABASE_URL = db_url
+    logger.info(f"Corrected DATABASE_URL format")
 
 # Detect Railway.com placeholder format
 if 'hostname' in db_url or 'port' in db_url:
