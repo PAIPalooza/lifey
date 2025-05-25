@@ -17,30 +17,51 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-# Log the database URL (with sensitive info masked)
+# Check if this is a Railway.com deployment with placeholder URL
 db_url = settings.DATABASE_URL
-masked_url = db_url
-if '@' in db_url:
-    # Mask password in URL for logging
-    user_pass = db_url.split('@')[0]
-    if ':' in user_pass:
-        user = user_pass.split(':')[0]
-        masked_url = f"{user}:****@{db_url.split('@')[1]}"
+use_fallback = False
+
+# Detect Railway.com placeholder format
+if 'hostname' in db_url or 'port' in db_url:
+    logger.warning("Detected Railway.com placeholder URL - using SQLite memory database as fallback")
+    use_fallback = True
+    # Don't log the actual URL as it contains placeholders
+    masked_url = "Railway.com placeholder URL (using fallback)"
+else:
+    # Standard URL masking for logging
+    masked_url = db_url
+    if '@' in db_url:
+        # Mask password in URL for logging
+        user_pass = db_url.split('@')[0]
+        if ':' in user_pass:
+            user = user_pass.split(':')[0]
+            masked_url = f"{user}:****@{db_url.split('@')[1]}"
 
 logger.info(f"Initializing database connection to: {masked_url}")
 
 # Create SQLAlchemy engine with robust error handling
 try:
-    engine = create_engine(
-        settings.DATABASE_URL,
-        pool_pre_ping=True,        # Verify connections before using them
-        pool_recycle=300,          # Recycle connections after 5 minutes
-        pool_size=5,               # Start with 5 connections
-        max_overflow=10,           # Allow up to 10 additional connections
-        connect_args={
-            "connect_timeout": 10,  # Timeout after 10 seconds
-        },
-    )
+    if use_fallback:
+        # CRITICAL: Using in-memory SQLite as fallback when Railway provides placeholder URL
+        # This allows the application to start and serve documentation
+        # Note: This is not suitable for production data storage
+        logger.warning("USING IN-MEMORY DATABASE - Application in documentation mode only")
+        engine = create_engine(
+            'sqlite:///:memory:',
+            connect_args={'check_same_thread': False}
+        )
+    else:
+        # Normal PostgreSQL engine creation
+        engine = create_engine(
+            settings.DATABASE_URL,
+            pool_pre_ping=True,        # Verify connections before using them
+            pool_recycle=300,          # Recycle connections after 5 minutes
+            pool_size=5,               # Start with 5 connections
+            max_overflow=10,           # Allow up to 10 additional connections
+            connect_args={
+                "connect_timeout": 10,  # Timeout after 10 seconds
+            },
+        )
     
     # Add connection pool event listeners for better diagnostics
     @event.listens_for(engine, "connect")
