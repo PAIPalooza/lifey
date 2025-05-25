@@ -10,7 +10,7 @@ class Settings(BaseModel):
     API_V1_STR: str = "/api/v1"
     
     # Database
-    DATABASE_URL: str = config('DATABASE_URL')
+    DATABASE_URL: str = config('DATABASE_URL', default='postgresql://postgres:postgres@localhost:5432/alo')
     
     # Security
     SECRET_KEY: str = config('SECRET_KEY', default='your-secret-key-here')
