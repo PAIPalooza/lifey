@@ -34,15 +34,39 @@ def validate_database_url(v: Optional[str]) -> str:
         logger.warning(f"No DATABASE_URL provided, using default: {default_url.replace('postgres:postgres', 'postgres:****')}")
         return default_url
     
-    # Check if it appears to be a Railway.com provided URL
-    if 'railway' in v.lower() or 'postgresql' not in v.lower():
-        logger.info("Using Railway.com or external database URL")
+    # Special handling for Railway.com placeholder format
+    # Railway might provide URLs with placeholders like postgresql://user:pass@hostname:port/database
+    if '@hostname:port/' in v or 'hostname' in v or 'port' in v:
+        logger.info("Detected Railway.com placeholder URL format, using default port")
+        # Extract user and password if possible
+        try:
+            # Handle the case where hostname:port are placeholders
+            if '@hostname:port/' in v:
+                parts = v.split('@')
+                user_pass = parts[0].split('://')
+                if len(user_pass) > 1:
+                    auth = user_pass[1]
+                    db_name = parts[1].split('/')[1]
+                    # Construct URL with proper port
+                    return f"postgresql://{auth}@localhost:5432/{db_name}"
+            
+            # If the URL contains 'hostname' but not in the expected format,
+            # or if it contains 'port' as a literal string instead of a number
+            logger.warning("Could not parse Railway.com URL format, using local default")
+            return 'postgresql://postgres:postgres@localhost:5432/alo'
+        except Exception as e:
+            logger.error(f"Error parsing Railway.com URL format: {str(e)}")
+            return 'postgresql://postgres:postgres@localhost:5432/alo'
+    
+    # Check if it appears to be another Railway.com URL format
+    if 'railway' in v.lower():
+        logger.info("Using Railway.com database URL")
         return v
     
     # Try to validate a standard PostgreSQL URL
     try:
         # Simple regex validation for postgres URL format
-        pattern = r'^postgresql://([^:]+):([^@]+)@([^:]+):([0-9]+)/(.+)$'
+        pattern = r'^postgresql://([^:]+):([^@]+)@([^:]+):([^/]+)/(.+)$'
         if not re.match(pattern, v):
             logger.warning(f"DATABASE_URL doesn't match expected format, returning as-is")
             return v
@@ -52,20 +76,22 @@ def validate_database_url(v: Optional[str]) -> str:
         if match:
             user, password, host, port, dbname = match.groups()
             try:
-                port = int(port)
+                # Try to parse port as integer
+                port_int = int(port)
                 # Reconstruct URL to ensure it's properly formatted
-                masked_url = f"postgresql://{user}:****@{host}:{port}/{dbname}"
+                masked_url = f"postgresql://{user}:****@{host}:{port_int}/{dbname}"
                 logger.info(f"Validated database URL: {masked_url}")
-                return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+                return f"postgresql://{user}:{password}@{host}:{port_int}/{dbname}"
             except ValueError:
-                logger.error(f"Invalid port in DATABASE_URL: {port}")
+                logger.warning(f"Non-numeric port in DATABASE_URL: {port}, using default port 5432")
                 # Use default port if the port is invalid
                 return f"postgresql://{user}:{password}@{host}:5432/{dbname}"
     except Exception as e:
         logger.error(f"Error validating DATABASE_URL: {str(e)}")
         
-    # Return the original if we can't validate/fix it
-    return v
+    # Return a working default if we can't validate/fix it
+    logger.warning("Could not validate DATABASE_URL format, using default")
+    return 'postgresql://postgres:postgres@localhost:5432/alo'
 
 class Settings(BaseModel):
     PROJECT_NAME: str = "ALO API"
