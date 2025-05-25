@@ -1,9 +1,71 @@
-from typing import List
+from typing import List, Optional
 from functools import lru_cache
 import os
+import re
+import logging
 
-from decouple import config
-from pydantic import AnyHttpUrl, BaseModel
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+try:
+    from decouple import config
+except ImportError:
+    logger.warning("python-decouple not installed, falling back to os.environ")
+    # Define a simple config function as fallback
+    def config(key, default=None, cast=None):
+        value = os.environ.get(key, default)
+        if value is not None and cast is not None:
+            try:
+                value = cast(value)
+            except Exception as e:
+                logger.error(f"Error casting {key}: {e}")
+                return default
+        return value
+
+from pydantic import AnyHttpUrl, BaseModel, validator
+
+
+def validate_database_url(v: Optional[str]) -> str:
+    """Validate and format database URL to ensure it's properly formatted"""
+    if not v:
+        # Fallback to a default that should work locally
+        default_url = 'postgresql://postgres:postgres@localhost:5432/alo'
+        logger.warning(f"No DATABASE_URL provided, using default: {default_url.replace('postgres:postgres', 'postgres:****')}")
+        return default_url
+    
+    # Check if it appears to be a Railway.com provided URL
+    if 'railway' in v.lower() or 'postgresql' not in v.lower():
+        logger.info("Using Railway.com or external database URL")
+        return v
+    
+    # Try to validate a standard PostgreSQL URL
+    try:
+        # Simple regex validation for postgres URL format
+        pattern = r'^postgresql://([^:]+):([^@]+)@([^:]+):([0-9]+)/(.+)$'
+        if not re.match(pattern, v):
+            logger.warning(f"DATABASE_URL doesn't match expected format, returning as-is")
+            return v
+            
+        # Extract components to validate the port
+        match = re.match(pattern, v)
+        if match:
+            user, password, host, port, dbname = match.groups()
+            try:
+                port = int(port)
+                # Reconstruct URL to ensure it's properly formatted
+                masked_url = f"postgresql://{user}:****@{host}:{port}/{dbname}"
+                logger.info(f"Validated database URL: {masked_url}")
+                return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
+            except ValueError:
+                logger.error(f"Invalid port in DATABASE_URL: {port}")
+                # Use default port if the port is invalid
+                return f"postgresql://{user}:{password}@{host}:5432/{dbname}"
+    except Exception as e:
+        logger.error(f"Error validating DATABASE_URL: {str(e)}")
+        
+    # Return the original if we can't validate/fix it
+    return v
 
 class Settings(BaseModel):
     PROJECT_NAME: str = "ALO API"
@@ -12,6 +74,10 @@ class Settings(BaseModel):
     # Database
     DATABASE_URL: str = config('DATABASE_URL', default='postgresql://postgres:postgres@localhost:5432/alo')
     
+    @validator("DATABASE_URL")
+    def validate_db_url(cls, v):
+        return validate_database_url(v)
+
     # Security
     SECRET_KEY: str = config('SECRET_KEY', default='your-secret-key-here')
     ALGORITHM: str = config('ALGORITHM', default='HS256')
